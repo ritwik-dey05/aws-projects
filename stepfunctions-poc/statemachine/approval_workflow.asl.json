@@ -1,0 +1,76 @@
+{
+  "Comment": "A human approval workflow for a question paper using Aurora Serverless.",
+  "StartAt": "CreateRequest",
+  "States": {
+    "CreateRequest": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:YOUR_REGION:YOUR_ACCOUNT_ID:function:CreateRequestFunction-Postgres",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.taskResult",
+      "Next": "AssignToAssessor"
+    },
+    "AssignToAssessor": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+      "Parameters": {
+        "QueueUrl": "YOUR_SQS_QUEUE_URL",
+        "MessageBody": {
+          "taskToken.$": "$$.Task.Token",
+          "input.$": "$"
+        }
+      },
+      "ResultPath": null,
+      "Next": "ApprovalChoice"
+    },
+    "ApprovalChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.output.action",
+          "StringEquals": "approved",
+          "Next": "ApprovedState"
+        },
+        {
+          "Variable": "$.output.action",
+          "StringEquals": "rejected",
+          "Next": "RejectedState"
+        }
+      ],
+      "Default": "FailedState"
+    },
+    "ApprovedState": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:YOUR_REGION:YOUR_ACCOUNT_ID:function:UpdateTaskStatusFunction-Postgres",
+        "Payload": {
+          "taskId.$": "$.taskResult.taskId",
+          "status": "APPROVED",
+          "comments.$": "$.output.comments"
+        }
+      },
+      "End": true
+    },
+    "RejectedState": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:YOUR_REGION:YOUR_ACCOUNT_ID:function:UpdateTaskStatusFunction-Postgres",
+        "Payload": {
+          "taskId.$": "$.taskResult.taskId",
+          "status": "REJECTED",
+          "comments.$": "$.output.comments"
+        }
+      },
+      "End": true
+    },
+    "FailedState": {
+      "Type": "Fail",
+      "Cause": "Invalid approval action",
+      "Error": "The action provided was not 'approved' or 'rejected'."
+    }
+  }
+}

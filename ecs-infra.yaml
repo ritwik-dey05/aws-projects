@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Cluster infrastructure for Spring Boot services
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID from static infrastructure
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnet IDs from static infrastructure
+  DbSecurityGroupId:
+    Type: String
+    Description: Database security group ID from static infrastructure
+  EndpointSecurityGroupId:
+    Type: String
+    Description: VPC endpoint security group ID from static infrastructure
+
+Resources:
+  # ECS Cluster for Spring Boot services
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: approval-cluster
+      CapacityProviders: [FARGATE]
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # Security group for ECS tasks
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: ecs-sg }]
+
+  # Allow ECS tasks to access RDS
+  DbIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroupId
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+
+  # VPC endpoint for ECS
+  ECSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecs
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref EndpointSecurityGroupId]
+
+  # VPC endpoint for ECR Docker registry
+  ECREndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref EndpointSecurityGroupId]
+
+  # VPC endpoint for ECR API
+  ECRApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref EndpointSecurityGroupId]
+
+  # VPC endpoint for CloudWatch Logs
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Ref PrivateSubnetIds
+      SecurityGroupIds: [!Ref EndpointSecurityGroupId]
+
+Outputs:
+  ECSClusterArn:
+    Value: !GetAtt ECSCluster.Arn
+    Export: { Name: ApprovalECSClusterArn }
+
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Export: { Name: ApprovalECSClusterName }
+
+  ECSSecurityGroupId:
+    Value: !Ref ECSSecurityGroup
+    Export: { Name: ApprovalECSSecurityGroupId }

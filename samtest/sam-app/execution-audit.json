@@ -1,0 +1,256 @@
+{
+    "events": [
+        {
+            "timestamp": "2025-09-04T09:10:22.748000+05:30",
+            "type": "ExecutionStarted",
+            "id": 1,
+            "previousEventId": 0,
+            "executionStartedEventDetails": {
+                "input": "{\"body\":{\"title\":\"Midterm QP\",\"content\":\"Set A, Physics\",\"assessorEmail\":\"your.email@example.com\"}}",
+                "inputDetails": {
+                    "truncated": false
+                },
+                "roleArn": "arn:aws:iam::327083199816:role/sam-app-ApprovalStateMachineRole-0zNGX8Ge0TSD"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:22.784000+05:30",
+            "type": "TaskStateEntered",
+            "id": 2,
+            "previousEventId": 0,
+            "stateEnteredEventDetails": {
+                "name": "CreateRequest",
+                "input": "{\"body\":{\"title\":\"Midterm QP\",\"content\":\"Set A, Physics\",\"assessorEmail\":\"your.email@example.com\"}}",
+                "inputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:22.784000+05:30",
+            "type": "TaskScheduled",
+            "id": 3,
+            "previousEventId": 2,
+            "taskScheduledEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke",
+                "region": "us-east-1",
+                "parameters": "{\"FunctionName\":\"arn:aws:lambda:us-east-1:327083199816:function:sam-app-CreateRequestFunction-fZOUbsBI0eqr\",\"Payload\":{\"body\":{\"title\":\"Midterm QP\",\"content\":\"Set A, Physics\",\"assessorEmail\":\"your.email@example.com\"}}}"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:22.828000+05:30",
+            "type": "TaskStarted",
+            "id": 4,
+            "previousEventId": 3,
+            "taskStartedEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.392000+05:30",
+            "type": "TaskSucceeded",
+            "id": 5,
+            "previousEventId": 4,
+            "taskSucceededEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke",
+                "output": "{\"ExecutedVersion\":\"$LATEST\",\"Payload\":{\"statusCode\":200,\"body\":\"{\\\"taskId\\\": \\\"aab81a18-937a-4fa3-873d-d6b62659b179\\\", \\\"questionId\\\": \\\"618d8c3a-e7ef-4dab-b76e-01c711004431\\\", \\\"assessorEmail\\\": \\\"your.email@example.com\\\", \\\"title\\\": \\\"Midterm QP\\\"}\"},\"SdkHttpMetadata\":{\"AllHttpHeaders\":{\"X-Amz-Executed-Version\":[\"$LATEST\"],\"x-amzn-Remapped-Content-Length\":[\"0\"],\"Connection\":[\"keep-alive\"],\"x-amzn-RequestId\":[\"6080f51e-bc7c-4cc9-8670-5721849a95ae\"],\"Content-Length\":[\"217\"],\"Date\":[\"Thu, 04 Sep 2025 03:40:26 GMT\"],\"X-Amzn-Trace-Id\":[\"Root=1-68b90a26-69729bba78180738086fcacb;Parent=2843a8870c0c57bd;Sampled=0;Lineage=1:f38fcb08:0\"],\"Content-Type\":[\"application/json\"]},\"HttpHeaders\":{\"Connection\":\"keep-alive\",\"Content-Length\":\"217\",\"Content-Type\":\"application/json\",\"Date\":\"Thu, 04 Sep 2025 03:40:26 GMT\",\"X-Amz-Executed-Version\":\"$LATEST\",\"x-amzn-Remapped-Content-Length\":\"0\",\"x-amzn-RequestId\":\"6080f51e-bc7c-4cc9-8670-5721849a95ae\",\"X-Amzn-Trace-Id\":\"Root=1-68b90a26-69729bba78180738086fcacb;Parent=2843a8870c0c57bd;Sampled=0;Lineage=1:f38fcb08:0\"},\"HttpStatusCode\":200},\"SdkResponseMetadata\":{\"RequestId\":\"6080f51e-bc7c-4cc9-8670-5721849a95ae\"},\"StatusCode\":200}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.430000+05:30",
+            "type": "TaskStateExited",
+            "id": 6,
+            "previousEventId": 5,
+            "stateExitedEventDetails": {
+                "name": "CreateRequest",
+                "output": "{\"statusCode\":200,\"body\":\"{\\\"taskId\\\": \\\"aab81a18-937a-4fa3-873d-d6b62659b179\\\", \\\"questionId\\\": \\\"618d8c3a-e7ef-4dab-b76e-01c711004431\\\", \\\"assessorEmail\\\": \\\"your.email@example.com\\\", \\\"title\\\": \\\"Midterm QP\\\"}\"}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.430000+05:30",
+            "type": "PassStateEntered",
+            "id": 7,
+            "previousEventId": 6,
+            "stateEnteredEventDetails": {
+                "name": "ParseCreateRequestOutput",
+                "input": "{\"statusCode\":200,\"body\":\"{\\\"taskId\\\": \\\"aab81a18-937a-4fa3-873d-d6b62659b179\\\", \\\"questionId\\\": \\\"618d8c3a-e7ef-4dab-b76e-01c711004431\\\", \\\"assessorEmail\\\": \\\"your.email@example.com\\\", \\\"title\\\": \\\"Midterm QP\\\"}\"}",
+                "inputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.430000+05:30",
+            "type": "PassStateExited",
+            "id": 8,
+            "previousEventId": 7,
+            "stateExitedEventDetails": {
+                "name": "ParseCreateRequestOutput",
+                "output": "{\"parsedBody\":{\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"questionId\":\"618d8c3a-e7ef-4dab-b76e-01c711004431\",\"assessorEmail\":\"your.email@example.com\",\"title\":\"Midterm QP\"},\"statusCode\":200}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.430000+05:30",
+            "type": "TaskStateEntered",
+            "id": 9,
+            "previousEventId": 8,
+            "stateEnteredEventDetails": {
+                "name": "SendApprovalToQueue",
+                "input": "{\"parsedBody\":{\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"questionId\":\"618d8c3a-e7ef-4dab-b76e-01c711004431\",\"assessorEmail\":\"your.email@example.com\",\"title\":\"Midterm QP\"},\"statusCode\":200}",
+                "inputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.430000+05:30",
+            "type": "TaskScheduled",
+            "id": 10,
+            "previousEventId": 9,
+            "taskScheduledEventDetails": {
+                "resourceType": "sqs",
+                "resource": "sendMessage.waitForTaskToken",
+                "region": "us-east-1",
+                "parameters": "{\"QueueUrl\":\"https://sqs.us-east-1.amazonaws.com/327083199816/approval-callback-queue\",\"MessageBody\":{\"assessorEmail\":\"your.email@example.com\",\"title\":\"Midterm QP\",\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"taskToken\":\"AQCMAAAAKgAAAAMAAAAAAAAAAZSUiM+RDumkYPUzH110m6erEMpyrM2kl3+Bkiz/P8WbLIlDjfkkF2N/YRMsCjoIAULHDospLK+Z3/86ZgZS5CpMa+YPidqFb646EWvytNB8VXw2c6pY1SZxJVoT2Aj6g5cAsq3eAVzyA7AzqPMtBgqcDYOoEYXcH729xEmr8NXgWyBk2jdaJmOYSdUwbqUjbGmtKd6O9OoWK8NQ6+yZhobp93nigQ9FjsKprUHXSxAH+ZVbrDSbQYfkUjGKuQ/8a7e2Wx5kF8fXiAcQYXKki2pkosrsken/7AAU19iSKP6VQKUwHzWpKY21Kkkf1MU/bF0h3TkL1EC/TZt40LKiqQRzJZKMGzz0ECWWVevZN/7IcnkHpPUqqMmU+OdnBk6wXZDHYNaO38QX6VS8mEutw1Y1gwfiQGLNuPbwXPhs2u4v89L3Hhi5iqtCZUztbY1nHJrIGH/VaP5m+IxKpals6XiOzxgqll7C2NJEVGloKx1E4QfkpNnVRCIEJ5ZcvFCr/klQgqGv838eXs1KlGwYpc3IC+3Owu3tz8+uRfMnWZmxHKKFd91W9Phh7afbb034FrVDFDYV5JWilvGA9A/d+VuNe3NtnhTFSS3PMk8AP0jxL1aoogSvcXcrXmX85tn5BiBypOe+QQCR\"}}",
+                "timeoutInSeconds": 172800
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.497000+05:30",
+            "type": "TaskStarted",
+            "id": 11,
+            "previousEventId": 10,
+            "taskStartedEventDetails": {
+                "resourceType": "sqs",
+                "resource": "sendMessage.waitForTaskToken"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:10:26.585000+05:30",
+            "type": "TaskSubmitted",
+            "id": 12,
+            "previousEventId": 11,
+            "taskSubmittedEventDetails": {
+                "resourceType": "sqs",
+                "resource": "sendMessage.waitForTaskToken",
+                "output": "{\"MD5OfMessageBody\":\"eff9907794a951d2b8d4ae70f20cfc84\",\"MessageId\":\"0fa6a79c-cd16-4179-9798-c5ecb6f666aa\",\"SdkHttpMetadata\":{\"AllHttpHeaders\":{\"x-amzn-RequestId\":[\"6611b8b6-a1e8-4ea5-a654-c27bc98b96e5\"],\"connection\":[\"keep-alive\"],\"Content-Length\":[\"106\"],\"Date\":[\"Thu, 04 Sep 2025 03:40:26 GMT\"],\"Content-Type\":[\"application/x-amz-json-1.0\"]},\"HttpHeaders\":{\"connection\":\"keep-alive\",\"Content-Length\":\"106\",\"Content-Type\":\"application/x-amz-json-1.0\",\"Date\":\"Thu, 04 Sep 2025 03:40:26 GMT\",\"x-amzn-RequestId\":\"6611b8b6-a1e8-4ea5-a654-c27bc98b96e5\"},\"HttpStatusCode\":200},\"SdkResponseMetadata\":{\"RequestId\":\"6611b8b6-a1e8-4ea5-a654-c27bc98b96e5\"}}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:55.155000+05:30",
+            "type": "TaskSucceeded",
+            "id": 13,
+            "previousEventId": 12,
+            "taskSucceededEventDetails": {
+                "resourceType": "sqs",
+                "resource": "sendMessage.waitForTaskToken",
+                "output": "{\"taskId\": \"aab81a18-937a-4fa3-873d-d6b62659b179\", \"decision\": \"APPROVE\", \"comments\": \"Looks good to me\"}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:55.178000+05:30",
+            "type": "TaskStateExited",
+            "id": 14,
+            "previousEventId": 13,
+            "stateExitedEventDetails": {
+                "name": "SendApprovalToQueue",
+                "output": "{\"taskId\": \"aab81a18-937a-4fa3-873d-d6b62659b179\", \"decision\": \"APPROVE\", \"comments\": \"Looks good to me\"}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:55.178000+05:30",
+            "type": "TaskStateEntered",
+            "id": 15,
+            "previousEventId": 14,
+            "stateEnteredEventDetails": {
+                "name": "FinalizeSuccess",
+                "input": "{\"taskId\": \"aab81a18-937a-4fa3-873d-d6b62659b179\", \"decision\": \"APPROVE\", \"comments\": \"Looks good to me\"}",
+                "inputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:55.178000+05:30",
+            "type": "TaskScheduled",
+            "id": 16,
+            "previousEventId": 15,
+            "taskScheduledEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke",
+                "region": "us-east-1",
+                "parameters": "{\"FunctionName\":\"arn:aws:lambda:us-east-1:327083199816:function:sam-app-FinalizeFunction-4oRusOEFaZ4l\",\"Payload\":{\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"decision\":\"APPROVE\",\"comments\":\"Looks good to me\"}}"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:55.233000+05:30",
+            "type": "TaskStarted",
+            "id": 17,
+            "previousEventId": 16,
+            "taskStartedEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke"
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:58.564000+05:30",
+            "type": "TaskSucceeded",
+            "id": 18,
+            "previousEventId": 17,
+            "taskSucceededEventDetails": {
+                "resourceType": "lambda",
+                "resource": "invoke",
+                "output": "{\"ExecutedVersion\":\"$LATEST\",\"Payload\":{\"status\":\"updated\",\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"statusSet\":\"APPROVED\"},\"SdkHttpMetadata\":{\"AllHttpHeaders\":{\"X-Amz-Executed-Version\":[\"$LATEST\"],\"x-amzn-Remapped-Content-Length\":[\"0\"],\"Connection\":[\"keep-alive\"],\"x-amzn-RequestId\":[\"640c829d-c62c-4606-a1d1-f99460638d79\"],\"Content-Length\":[\"96\"],\"Date\":[\"Thu, 04 Sep 2025 03:42:58 GMT\"],\"X-Amzn-Trace-Id\":[\"Root=1-68b90abf-26900b3c63c5ad4f045eff76;Parent=12d25e3e0d6b6221;Sampled=0;Lineage=1:6202b584:0\"],\"Content-Type\":[\"application/json\"]},\"HttpHeaders\":{\"Connection\":\"keep-alive\",\"Content-Length\":\"96\",\"Content-Type\":\"application/json\",\"Date\":\"Thu, 04 Sep 2025 03:42:58 GMT\",\"X-Amz-Executed-Version\":\"$LATEST\",\"x-amzn-Remapped-Content-Length\":\"0\",\"x-amzn-RequestId\":\"640c829d-c62c-4606-a1d1-f99460638d79\",\"X-Amzn-Trace-Id\":\"Root=1-68b90abf-26900b3c63c5ad4f045eff76;Parent=12d25e3e0d6b6221;Sampled=0;Lineage=1:6202b584:0\"},\"HttpStatusCode\":200},\"SdkResponseMetadata\":{\"RequestId\":\"640c829d-c62c-4606-a1d1-f99460638d79\"},\"StatusCode\":200}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:58.597000+05:30",
+            "type": "TaskStateExited",
+            "id": 19,
+            "previousEventId": 18,
+            "stateExitedEventDetails": {
+                "name": "FinalizeSuccess",
+                "output": "{\"status\":\"updated\",\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"statusSet\":\"APPROVED\"}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        },
+        {
+            "timestamp": "2025-09-04T09:12:58.628000+05:30",
+            "type": "ExecutionSucceeded",
+            "id": 20,
+            "previousEventId": 19,
+            "executionSucceededEventDetails": {
+                "output": "{\"status\":\"updated\",\"taskId\":\"aab81a18-937a-4fa3-873d-d6b62659b179\",\"statusSet\":\"APPROVED\"}",
+                "outputDetails": {
+                    "truncated": false
+                }
+            }
+        }
+    ]
+}

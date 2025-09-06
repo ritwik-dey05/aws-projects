@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Generic ECS Services Stack
+
+Parameters:
+  VpcId:
+    Type: String
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+  ECSClusterName:
+    Type: String
+  ECSSecurityGroupId:
+    Type: String
+  DbSecretArn:
+    Type: String
+  DbHost:
+    Type: String
+  DbPort:
+    Type: String
+    Default: "5432"
+  DbName:
+    Type: String
+    Default: "appdb"
+  ApprovalQueueUrl:
+    Type: String
+  AppBaseUrl:
+    Type: String
+    Default: "https://example.com"
+  CallbackServiceImageUri:
+    Type: String
+    Description: ECR image URI for callback service
+
+Resources:
+  # Callback Service Resources
+  CallbackTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: callback-service
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !GetAtt CallbackExecutionRole.Arn
+      TaskRoleArn: !GetAtt CallbackTaskRole.Arn
+      ContainerDefinitions:
+        - Name: callback-service
+          Image: !Ref CallbackServiceImageUri
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CallbackLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DbHost
+            - Name: DB_PORT
+              Value: !Ref DbPort
+            - Name: DB_NAME
+              Value: !Ref DbName
+            - Name: SQS_QUEUE_URL
+              Value: !Ref ApprovalQueueUrl
+            - Name: APP_BASE_URL
+              Value: !Ref AppBaseUrl
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub "${DbSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${DbSecretArn}:password::"
+
+  CallbackService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: callback-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref CallbackTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [!Ref ECSSecurityGroupId]
+          AssignPublicIp: DISABLED
+
+  CallbackExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DbSecretArn
+
+  CallbackTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:approval-callback-queue"
+
+  CallbackLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/callback-service
+      RetentionInDays: 7
+
+  # Generic Internal ALB for ECS Services
+  InternalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ecs-internal-alb
+      Scheme: internal
+      Type: application
+      Subnets: !Ref PrivateSubnetIds
+      SecurityGroups: [!Ref InternalALBSecurityGroup]
+
+  InternalALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Internal ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          DestinationSecurityGroupId: !Ref ECSSecurityGroupId
+
+  InternalALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 404
+            ContentType: text/plain
+            MessageBody: "Service not found"
+      LoadBalancerArn: !Ref InternalALB
+      Port: 80
+      Protocol: HTTP
+
+Outputs:
+  CallbackServiceArn:
+    Value: !Ref CallbackService
+    Description: ARN of the Callback Service
+  InternalALBDNSName:
+    Value: !GetAtt InternalALB.DNSName
+    Description: DNS name of the Internal ALB
+    Export:
+      Name: InternalALBDNSName
+  InternalALBListenerArn:
+    Value: !Ref InternalALBListener
+    Description: ARN of the Internal ALB Listener
+    Export:
+      Name: InternalALBListenerArn
+  InternalALBUrl:
+    Value: !Sub "http://${InternalALB.DNSName}"
+    Description: Base URL of the Internal ALB
+    Export:
+      Name: InternalALBUrl

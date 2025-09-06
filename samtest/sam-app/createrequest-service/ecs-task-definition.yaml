@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Task Definition for CreateRequest Service
+
+Parameters:
+  VpcId:
+    Type: String
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+  ECSClusterName:
+    Type: String
+  ECSSecurityGroupId:
+    Type: String
+  DbSecretArn:
+    Type: String
+  DbHost:
+    Type: String
+  DbPort:
+    Type: String
+    Default: "5432"
+  DbName:
+    Type: String
+    Default: "appdb"
+  CreateRequestServiceImageUri:
+    Type: String
+    Description: ECR image URI for the CreateRequest service
+  InternalALBListenerArn:
+    Type: String
+    Description: ARN of the internal ALB listener
+
+Resources:
+  CreateRequestExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DbSecretArn
+
+  CreateRequestTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  CreateRequestTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: createrequest-service
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !GetAtt CreateRequestExecutionRole.Arn
+      TaskRoleArn: !GetAtt CreateRequestTaskRole.Arn
+      ContainerDefinitions:
+        - Name: createrequest-service
+          Image: !Ref CreateRequestServiceImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CreateRequestLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DbHost
+            - Name: DB_PORT
+              Value: !Ref DbPort
+            - Name: DB_NAME
+              Value: !Ref DbName
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub "${DbSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${DbSecretArn}:password::"
+
+  CreateRequestService:
+    Type: AWS::ECS::Service
+    DependsOn: CreateRequestListenerRule
+    Properties:
+      ServiceName: createrequest-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref CreateRequestTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      LoadBalancers:
+        - ContainerName: createrequest-service
+          ContainerPort: 8080
+          TargetGroupArn: !Ref CreateRequestTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [!Ref ECSSecurityGroupId]
+          AssignPublicIp: DISABLED
+
+  CreateRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/createrequest-service
+      RetentionInDays: 7
+
+  CreateRequestTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: createrequest-tg
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /actuator/health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  CreateRequestListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref CreateRequestTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: ["/create-request*"]
+      ListenerArn: !Ref InternalALBListenerArn
+      Priority: 100
+
+Outputs:
+  CreateRequestServiceArn:
+    Value: !Ref CreateRequestService
+    Description: ARN of the CreateRequest Service

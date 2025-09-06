@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Creates an EC2 instance with an IAM role for DynamoDB access and installs Git and AWS CLI via User Data.
+  You will need to manually SSH in to clone your Git repo and execute your script.
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  InstanceType:
+    Description: WebServer EC2 instance type (e.g. t2.micro, t3.small).
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t3.nano
+      - t3.micro
+      - t3.small
+      - t3.medium
+    ConstraintDescription: Must be a valid EC2 instance type.
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Latest Amazon Linux 2 AMI ID from SSM Parameter Store.
+
+  VPCId:
+    Description: The ID of your existing VPC.
+    Type: AWS::EC2::VPC::Id
+
+  SubnetId:
+    Description: The ID of a subnet within your chosen VPC where the EC2 instance will be launched.
+    Type: AWS::EC2::Subnet::Id
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: "EC2 Configuration"
+        Parameters:
+          - KeyName
+          - InstanceType
+          - VPCId
+          - SubnetId
+      - Label: "AMI Configuration"
+        Parameters:
+          - LatestAmiId
+
+Resources:
+  EC2InstanceRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: IAM policy for EC2 to manage DynamoDB tables.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:CreateTable
+              - dynamodb:UpdateTable
+              - dynamodb:DeleteTable
+              - dynamodb:DescribeTable
+              - dynamodb:ListTables
+              # Add other DynamoDB actions if your script performs them
+            Resource: "arn:aws:dynamodb:YOUR_REGION:YOUR_ACCOUNT_ID:table/*" # <<< REPLACE these values
+      ManagedPolicyName: EC2DynamoDBTableManagementPolicy
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      RoleName: EC2DynamoDBTableCreatorRole
+      ManagedPolicyArns:
+        - !Ref EC2InstanceRolePolicy
+
+  AttachRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: EC2DynamoDBTableCreatorPolicyAttachment
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt EC2InstanceRole.Arn
+      Roles:
+        - !Ref EC2InstanceRole
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+      InstanceProfileName: EC2DynamoDBTableCreatorInstanceProfile
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: EC2SSHAccessSG
+      GroupDescription: Enable SSH access to EC2 instance
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 # <<< WARNING: Replace with your IP in production
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !Ref SubnetId
+          GroupSet:
+            - !GetAtt EC2SecurityGroup.GroupId
+          AssociatePublicIpAddress: "true"
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: DynamoDBScriptRunner
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -xe
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          echo "Starting user data script..."
+
+          # Update system packages
+          yum update -y
+
+          # Install Git
+          echo "Installing Git..."
+          yum install git -y
+
+          # Install dependencies for AWS CLI v2
+          echo "Installing curl and unzip for AWS CLI v2..."
+          yum install curl unzip -y
+
+          # Install AWS CLI v2
+          echo "Installing AWS CLI v2..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install --update
+          rm -rf aws awscliv2.zip
+
+          # Configure AWS CLI default region
+          echo "Configuring AWS CLI default region..."
+          aws configure set region YOUR_REGION # <<< REPLACE with your region
+
+          echo "User data script finished."
+
+Outputs:
+  InstanceId:
+    Description: The ID of the EC2 Instance
+    Value: !Ref EC2Instance
+
+  PublicIp:
+    Description: The Public IP address of the EC2 Instance
+    Value: !GetAtt EC2Instance.PublicIp
+
+  PublicDNS:
+    Description: The Public DNS name of the EC2 Instance
+    Value: !GetAtt EC2Instance.PublicDnsName

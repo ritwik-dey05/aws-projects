@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Services — CreateRequest exposed via Internal ALB; Callback private
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC Id (from static infra)
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnets for ECS tasks
+  ECSClusterName:
+    Type: String
+    Description: ECS Cluster name (from static infra)
+  ECSSecurityGroupId:
+    Type: String
+    Description: Security Group ID used by ECS tasks (from static infra)
+  InternalALBArn:
+    Type: String
+    Description: ARN of the Internal ALB (from static infra)
+  InternalALBListenerArn:
+    Type: String
+    Description: ARN of the HTTP Listener on the Internal ALB (from static infra)
+  InternalALBSecurityGroupId:
+    Type: String
+    Description: Security Group ID attached to Internal ALB (from static infra)
+
+  # TaskDefinition ARNs provided by ecs-task-definition.yaml (or your pipeline)
+  CreateRequestTaskDefinitionArn:
+    Type: String
+  CallbackTaskDefinitionArn:
+    Type: String
+
+  DesiredCountCreateRequest:
+    Type: Number
+    Default: 1
+  DesiredCountCallback:
+    Type: Number
+    Default: 1
+
+Resources:
+  # Target group for CreateRequestService (HTTP 8080, IP target type for Fargate)
+  CreateRequestTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /actuator/health
+      Matcher:
+        HttpCode: "200-399"
+
+  # Listener rule to route /create-request* to the CreateRequest target group
+  CreateRequestListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref InternalALBListenerArn
+      Priority: 100
+      Conditions:
+        - Field: path-pattern
+          Values: [ "/create-request*" ]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref CreateRequestTargetGroup
+
+  # Allow ALB to reach ECS tasks on 8080 (tight SG flow)
+  ECSIngressFromALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroupId
+      SourceSecurityGroupId: !Ref InternalALBSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+
+  # --------------------- ECS Services ---------------------
+
+  CreateRequestService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - CreateRequestListenerRule
+    Properties:
+      ServiceName: create-request-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref CreateRequestTaskDefinitionArn
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCountCreateRequest
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [ !Ref ECSSecurityGroupId ]
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref CreateRequestTargetGroup
+          ContainerName: create-request
+          ContainerPort: 8080
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+
+  # No LoadBalancers here—CallbackService remains private headless worker
+  CallbackService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: callback-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref CallbackTaskDefinitionArn
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCountCallback
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [ !Ref ECSSecurityGroupId ]
+          AssignPublicIp: DISABLED
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+
+Outputs:
+  CreateRequestTargetGroupArn:
+    Description: Target group for CreateRequestService
+    Value: !Ref CreateRequestTargetGroup
+
+  CreateRequestListenerRuleArn:
+    Description: Listener rule for /create-request*
+    Value: !Ref CreateRequestListenerRule
+
+  CreateRequestServiceName:
+    Description: ECS service name
+    Value: !GetAtt CreateRequestService.Name
+
+  CallbackServiceName:
+    Description: ECS service name
+    Value: !GetAtt CallbackService.Name

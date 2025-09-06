@@ -1,0 +1,7 @@
+{
+  "httpMethod": "POST",
+  "pathParameters": {
+    "taskId": "e8b1254b-7d66-48dd-9b8f-a3e9640b3c8d"
+  },
+  "body": "{\"decision\": \"APPROVE\", \"comments\": \"Looks good\"}"
+}

@@ -1,0 +1,11 @@
+Resources:
+  Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 300
+      MemorySize: 128
+      Handler: app.lambda_handler
+      CodeUri: /Users/rit/aws/samtest/sam-app/resume_workflow
+      Runtime: python3.12
+      Architectures:
+        - x86_64

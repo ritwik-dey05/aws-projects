@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Temporary SSM bastion (no public IP) to port-forward from laptop to RDS in the Approval VPC.
+  Safe to create and delete independently. Adds a single DB ingress rule from the bastion SG.
+
+Parameters:
+  CreateVPCEndpoints:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Create SSM interface VPC endpoints in the VPC. Set to 'false' if they already exist.
+  AmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+    Description: Amazon Linux 2023 AMI via public SSM parameter
+
+Conditions:
+  CreateVPCEndpointsIsTrue: !Equals [!Ref CreateVPCEndpoints, "true"]
+
+Resources:
+
+  # --- Security groups ---
+  EC2BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SSM bastion SG (no inbound; egress only)
+      VpcId: !ImportValue ApprovalVpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: approval-ssm-bastion-sg }]
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateVPCEndpointsIsTrue
+    Properties:
+      GroupDescription: SG for SSM Interface VPC Endpoints
+      VpcId: !ImportValue ApprovalVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EC2BastionSG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: approval-ssm-endpoints-sg }]
+
+  # Allow DB access from the bastion SG
+  DbIngressFromBastion:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !ImportValue ApprovalDbSecurityGroupId
+      SourceSecurityGroupId: !Ref EC2BastionSG
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+
+  # --- IAM for SSM ---
+  EC2BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags: [{ Key: Name, Value: approval-ssm-bastion-role }]
+
+  EC2BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref EC2BastionRole]
+
+  # --- EC2 instance (no public IP) ---
+  EC2Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref EC2BastionInstanceProfile
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: !Select [0, !Split [",", !ImportValue ApprovalPrivateSubnets]]
+      SecurityGroupIds: [!Ref EC2BastionSG]
+      SourceDestCheck: true
+      Tags:
+        - Key: Name
+          Value: approval-ssm-bastion
+
+  # --- Interface VPC Endpoints for SSM (optional) ---
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateVPCEndpointsIsTrue
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      VpcId: !ImportValue ApprovalVpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Split [",", !ImportValue ApprovalPrivateSubnets]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      Tags: [{ Key: Name, Value: approval-ssm-endpoint }]
+
+  SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateVPCEndpointsIsTrue
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      VpcId: !ImportValue ApprovalVpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Split [",", !ImportValue ApprovalPrivateSubnets]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      Tags: [{ Key: Name, Value: approval-ssmmessages-endpoint }]
+
+  EC2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateVPCEndpointsIsTrue
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      VpcId: !ImportValue ApprovalVpcId
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: !Split [",", !ImportValue ApprovalPrivateSubnets]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      Tags: [{ Key: Name, Value: approval-ec2messages-endpoint }]
+
+Outputs:
+  BastionInstanceId:
+    Description: InstanceId to use in SSM port forwarding
+    Value: !Ref EC2Bastion
+  BastionSecurityGroupId:
+    Description: Security Group attached to the bastion
+    Value: !Ref EC2BastionSG
+  DbIngressDescription:
+    Description: Ingress rule that allows the bastion to connect to the DB SG (deleted with this stack)
+    Value: !Ref DbIngressFromBastion
+  Notes:
+    Description: Usage notes
+    Value: |
+      To start a port-forward from your laptop to RDS through the bastion:
+        INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name <this-stack-name> --query "Stacks[0].Outputs[?OutputKey=='BastionInstanceId'].OutputValue" --output text)
+        RDS_HOST=$(aws cloudformation list-exports --query "Exports[?Name=='ApprovalDbHost'].Value" --output text)
+
+        aws ssm start-session \
+          --target "$INSTANCE_ID" \
+          --document-name AWS-StartPortForwardingSessionToRemoteHost \
+          --parameters "{\"host\":[\"$RDS_HOST\"],\"portNumber\":[\"5432\"],\"localPortNumber\":[\"5432\"]}"
+
+      Then, in another terminal:
+        psql -h 127.0.0.1 -p 5432 -U appuser -d appdb
+
+      If your VPC already has SSM/SSMMessages/EC2Messages endpoints, deploy with:
+        aws cloudformation deploy --stack-name approval-bastion --template-file ssm-bastion.yaml --parameter-overrides CreateVPCEndpoints=false --capabilities CAPABILITY_NAMED_IAM

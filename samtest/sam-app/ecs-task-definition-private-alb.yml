@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Task Definitions + Roles for CreateRequest and Callback services
+
+Parameters:
+  CreateRequestImageUri:
+    Type: String
+    Description: ECR image URI for CreateRequest service
+  CallbackImageUri:
+    Type: String
+    Description: ECR image URI for Callback service
+
+  # DB and Secrets (from static infra)
+  DbSecretArn:
+    Type: String
+  DbHost:
+    Type: String
+  DbPort:
+    Type: String
+    Default: "5432"
+  DbName:
+    Type: String
+    Default: "appdb"
+
+  # Queues / Topics the tasks might use
+  ApprovalQueueUrl:
+    Type: String
+  EmailTopicArn:
+    Type: String
+    Default: ""
+
+  # Optional: custom log group name (or let stack create one)
+  LogsGroupName:
+    Type: String
+    Default: "/ecs/app"
+
+Resources:
+  # Log group used by both tasks
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogsGroupName
+      RetentionInDays: 7
+
+  # --- IAM Roles ---
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ecsTaskExecutionRole-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: extra-exec-perms
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow pulling secrets at container start if needed by exec role (some setups use this)
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DbSecretArn
+              # Allow logs: covered by managed policy, included for clarity
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ecsAppTaskRole-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AppRuntimeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Secrets at runtime
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DbSecretArn
+              # SQS (consumer / producer, add/remove as appropriate)
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueUrl
+                  - sqs:SendMessage
+                Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:*
+  # --------------------- Task Definitions ---------------------
+
+  CreateRequestTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: create-request-task
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [ FARGATE ]
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: create-request
+          Image: !Ref CreateRequestImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DbHost
+            - Name: DB_PORT
+              Value: !Ref DbPort
+            - Name: DB_NAME
+              Value: !Ref DbName
+            - Name: APPROVAL_QUEUE_URL
+              Value: !Ref ApprovalQueueUrl
+          Secrets:
+            # JSON key selectors for username/password inside the secret
+            - Name: DB_USERNAME
+              ValueFrom: !Sub "${DbSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${DbSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AppLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: create-request
+          # (Optional) Container-level healthcheck—TG healthcheck is already configured
+          # HealthCheck:
+          #   Command: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+          #   Interval: 30
+          #   Timeout: 5
+          #   Retries: 3
+          #   StartPeriod: 60
+
+  CallbackTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: callback-task
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [ FARGATE ]
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: callback-service
+          Image: !Ref CallbackImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DbHost
+            - Name: DB_PORT
+              Value: !Ref DbPort
+            - Name: DB_NAME
+              Value: !Ref DbName
+            - Name: APPROVAL_QUEUE_URL
+              Value: !Ref ApprovalQueueUrl
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub "${DbSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${DbSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AppLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: callback
+
+Outputs:
+  CreateRequestTaskDefinitionArn:
+    Value: !Ref CreateRequestTaskDefinition
+  CallbackTaskDefinitionArn:
+    Value: !Ref CallbackTaskDefinition
+  TaskExecutionRoleArn:
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+  TaskRoleArn:
+    Value: !GetAtt ECSTaskRole.Arn
+  LogsGroupName:
+    Value: !Ref AppLogGroup

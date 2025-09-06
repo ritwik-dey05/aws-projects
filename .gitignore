@@ -1,0 +1,22 @@
+# Ignore .class files
+*.class
+
+# Ignore Python virtual environment folders
+.venv/
+venv/
+
+# Eclipse IDE files and folders
+.metadata/
+.project
+.classpath
+.settings/
+bin/
+target/classes/
+
+# PyCharm IDE files and folders
+.idea/
+*.iml
+*.iws
+
+# VSCode files and folders
+.vscode/

@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Static networking + RDS + SQS (POC) for Human Approval Workflow (cost-optimized, no NAT)
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+  DBName:
+    Type: String
+    Default: appdb
+  DBUsername:
+    Type: String
+    Default: appuser
+  DBPassword:
+    Type: String
+    NoEcho: true
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+  EmailSnsTopicName:
+    Type: String
+    Default: approval-email-topic
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: approval-vpc }]
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{ Key: Name, Value: private-az1 }]
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: [{ Key: Name, Value: private-az2 }]
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB subnets
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: DB SG (ingress added from Lambda SG in SAM stack)
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: db-sg }]
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for Interface VPC Endpoints (allow HTTPS from VPC)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: vpce-sg }]
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      EngineVersion: "15"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DBSecurityGroup]
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 0
+    DeletionPolicy: Delete
+
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: approval/db-credentials
+      Description: Credentials for Postgres user used by Lambda
+      SecretString: !Sub |
+        {"username":"${DBUsername}","password":"${DBPassword}"}
+
+  ApprovalQueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: approval-callback-dlq
+      MessageRetentionPeriod: 1209600
+
+  ApprovalQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: approval-callback-queue
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ApprovalQueueDLQ.Arn
+        maxReceiveCount: 3
+
+  EmailTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref EmailSnsTopicName
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SQSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SNSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sns
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export: { Name: ApprovalVpcId }
+
+  PrivateSubnetIds:
+    Description: Comma separated private subnet IDs
+    Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export: { Name: ApprovalPrivateSubnets }
+
+  DbEndpointAddress:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export: { Name: ApprovalDbHost }
+
+  DbPort:
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export: { Name: ApprovalDbPort }
+
+  DbName:
+    Value: !Ref DBName
+    Export: { Name: ApprovalDbName }
+
+  DbSecretArn:
+    Value: !Ref DbSecret
+    Export: { Name: ApprovalDbSecretArn }
+
+  DbSecurityGroupId:
+    Value: !Ref DBSecurityGroup
+    Export: { Name: ApprovalDbSecurityGroupId }
+
+  ApprovalQueueUrl:
+    Value: !Ref ApprovalQueue
+    Export: { Name: ApprovalQueueUrl }
+
+  ApprovalQueueArn:
+    Value: !GetAtt ApprovalQueue.Arn
+    Export: { Name: ApprovalQueueArn }
+
+  EmailTopicArn:
+    Value: !Ref EmailTopic
+    Export: { Name: ApprovalEmailTopicArn }

@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Application stack for the Human Approval Workflow: Lambdas, State Machine, API Gateway'
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: 'VPC ID from the infrastructure stack.'
+  AppSubnetIds:
+    Type: CommaDelimitedList
+    Description: 'Application Subnet IDs from the infrastructure stack.'
+  LambdaSecurityGroupId:
+    Type: String
+    Description: 'Security Group ID for Lambda Functions from the infrastructure stack.'
+  DBSecretArn:
+    Type: String
+    Description: 'ARN of the Secrets Manager secret for DB credentials.'
+  ApprovalSqsQueueUrl:
+    Type: String
+    Description: 'URL of the SQS queue.'
+  ApprovalSqsQueueArn:
+    Type: String
+    Description: 'ARN of the SQS queue.'
+
+Resources:
+  # ------------------------------------------------------------#
+  # IAM Roles
+  # ------------------------------------------------------------#
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: 'LambdaVpcExecutionPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DeleteNetworkInterface'
+                Resource: '*'
+        - PolicyName: 'LambdaBaseExecutionPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
+        - PolicyName: 'SecretsManagerReadPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'secretsmanager:GetSecretValue'
+                Resource: !Ref DBSecretArn
+        - PolicyName: 'SESPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'ses:SendEmail'
+                Resource: '*' # Be more specific in production
+        - PolicyName: 'StepFunctionsResumePolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'states:SendTaskSuccess'
+                Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*'
+
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub 'states.${AWS::Region}.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'StepFunctionsExecutionPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource:
+                  - !GetAtt CreateRequestFunction.Arn
+                  - !GetAtt CallbackFunction.Arn
+                  - !GetAtt ResumeWorkflowFunction.Arn
+                  - !GetAtt UpdateTaskStatusFunction.Arn
+              - Effect: Allow
+                Action:
+                  - 'sqs:SendMessage'
+                Resource: !Ref ApprovalSqsQueueArn
+
+  # ------------------------------------------------------------#
+  # Lambda Layer for Psycopg2
+  # ------------------------------------------------------------#
+  Psycopg2Layer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: psycopg2-layer
+      Description: "Psycopg2 dependency for PostgreSQL"
+      Content:
+        S3Bucket: !Sub 'aws-layers-bucket-${AWS::Region}' # This is a public bucket with pre-built layers
+        S3Key: 'psycopg2-py3.11.zip' # Adjust python version if needed
+      CompatibleRuntimes:
+        - python3.11
+
+  # ------------------------------------------------------------#
+  # Lambda Functions
+  # ------------------------------------------------------------#
+  CreateRequestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: 'CreateRequestFunction-Postgres'
+      Handler: 'index.lambda_handler'
+      Runtime: 'python3.11'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref Psycopg2Layer
+      Environment:
+        Variables:
+          DB_SECRET_ARN: !Ref DBSecretArn
+          AWS_REGION: !Ref AWS::Region
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+        SubnetIds: !Ref AppSubnetIds
+      Code:
+        ZipFile: |
+          # Paste the Python code for CreateRequestFunction here
+
+  CallbackFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: 'CallbackFunction-Postgres'
+      Handler: 'index.lambda_handler'
+      Runtime: 'python3.11'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref Psycopg2Layer
+      Environment:
+        Variables:
+          DB_SECRET_ARN: !Ref DBSecretArn
+          AWS_REGION: !Ref AWS::Region
+          SENDER_EMAIL: 'your-verified-email@example.com' # CHANGE THIS
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+        SubnetIds: !Ref AppSubnetIds
+      Code:
+        ZipFile: |
+          # Paste the Python code for CallbackFunction here
+
+  ResumeWorkflowFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: 'ResumeWorkflowFunction-Postgres'
+      Handler: 'index.lambda_handler'
+      Runtime: 'python3.11'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref Psycopg2Layer
+      Environment:
+        Variables:
+          DB_SECRET_ARN: !Ref DBSecretArn
+          AWS_REGION: !Ref AWS::Region
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+        SubnetIds: !Ref AppSubnetIds
+      Code:
+        ZipFile: |
+          # Paste the Python code for ResumeWorkflowFunction here
+
+  UpdateTaskStatusFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: 'UpdateTaskStatusFunction-Postgres'
+      Handler: 'index.lambda_handler'
+      Runtime: 'python3.11'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Layers:
+        - !Ref Psycopg2Layer
+      Environment:
+        Variables:
+          DB_SECRET_ARN: !Ref DBSecretArn
+          AWS_REGION: !Ref AWS::Region
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+        SubnetIds: !Ref AppSubnetIds
+      Code:
+        ZipFile: |
+          # Paste the Python code for UpdateTaskStatusFunction here
+
+  SqsTriggerMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref ApprovalSqsQueueArn
+      FunctionName: !GetAtt CallbackFunction.Arn
+      Enabled: true
+
+  # ------------------------------------------------------------#
+  # API Gateway
+  # ------------------------------------------------------------#
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: 'ApprovalWorkflowApi'
+
+  ApiRequestsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: 'requests'
+
+  ApiRequestsPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiRequestsResource
+      HttpMethod: 'POST'
+      AuthorizationType: 'NONE'
+      Integration:
+        Type: 'AWS_PROXY'
+        IntegrationHttpMethod: 'POST'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateRequestFunction.Arn}/invocations'
+
+  ApiTasksResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: 'tasks'
+
+  ApiTasksReviewResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !Ref ApiTasksResource
+      PathPart: 'review'
+
+  ApiTasksReviewPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiTasksReviewResource
+      HttpMethod: 'POST'
+      AuthorizationType: 'NONE'
+      Integration:
+        Type: 'AWS_PROXY'
+        IntegrationHttpMethod: 'POST'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ResumeWorkflowFunction.Arn}/invocations'
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiRequestsPostMethod
+      - ApiTasksReviewPostMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: 'prod'
+
+  ApiGatewayInvokePermission1:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CreateRequestFunction.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  ApiGatewayInvokePermission2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ResumeWorkflowFunction.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # ------------------------------------------------------------#
+  # Step Function State Machine
+  # ------------------------------------------------------------#
+  ApprovalStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: 'HumanApprovalWorkflow'
+      RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
+      DefinitionString: !Sub
+        - |-
+          {
+            "Comment": "A human approval workflow for a question paper using Aurora Serverless.",
+            "StartAt": "CreateRequest",
+            "States": {
+              "CreateRequest": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${CreateRequestFunctionArn}",
+                  "Payload.$": "$"
+                },
+                "ResultPath": "$.taskResult",
+                "Next": "AssignToAssessor"
+              },
+              "AssignToAssessor": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${SqsQueueUrl}",
+                  "MessageBody": {
+                    "taskToken.$": "$$.Task.Token",
+                    "input.$": "$"
+                  }
+                },
+                "ResultPath": null,
+                "Next": "ApprovalChoice"
+              },
+              "ApprovalChoice": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.output.action",
+                    "StringEquals": "approved",
+                    "Next": "ApprovedState"
+                  },
+                  {
+                    "Variable": "$.output.action",
+                    "StringEquals": "rejected",
+                    "Next": "RejectedState"
+                  }
+                ],
+                "Default": "FailedState"
+              },
+              "ApprovedState": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${UpdateTaskStatusFunctionArn}",
+                  "Payload": {
+                    "taskId.$": "$.taskResult.taskId",
+                    "status": "APPROVED",
+                    "comments.$": "$.output.comments"
+                  }
+                },
+                "End": true
+              },
+              "RejectedState": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${UpdateTaskStatusFunctionArn}",
+                  "Payload": {
+                    "taskId.$": "$.taskResult.taskId",
+                    "status": "REJECTED",
+                    "comments.$": "$.output.comments"
+                  }
+                },
+                "End": true
+              },
+              "FailedState": {
+                "Type": "Fail",
+                "Cause": "Invalid approval action",
+                "Error": "The action provided was not 'approved' or 'rejected'."
+              }
+            }
+          }
+        - CreateRequestFunctionArn: !GetAtt CreateRequestFunction.Arn
+          UpdateTaskStatusFunctionArn: !GetAtt UpdateTaskStatusFunction.Arn
+          SqsQueueUrl: !Ref ApprovalSqsQueueUrl
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"

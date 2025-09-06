@@ -1,0 +1,11 @@
+{
+  "CreateRequestFunction": {
+    "DbSecretArn": "arn:aws:secretsmanager:us-east-1:327083199816:secret:approval/db-credentials-e0YF6M",
+    "FT_API_DELAY": "300",
+    "FT_API_JITTER": "150",
+    "API1_URL": "https://w7jqg.wiremockapi.cloud/order",
+    "API2_URL": "https://w7jqg.wiremockapi.cloud/product",
+    "DEST_QUEUE_URL": "https://sqs.local/dest",
+    "DLQ_URL":   "https://sqs.local/dlq"
+  }
+}

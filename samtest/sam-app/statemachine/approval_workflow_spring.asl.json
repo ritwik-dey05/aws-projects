@@ -1,0 +1,121 @@
+{
+  "Comment": "Human approval workflow with Spring Boot service + SQS callback + Task Token",
+  "StartAt": "CreateRequest",
+  "States": {
+    "CreateRequest": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::apigatewayv2:invoke",
+      "Arguments": {
+        "ApiEndpoint": "${CreateRequestServiceUrl}/create-request",
+        "Method": "POST",
+        "RequestBody.$": "$.body",
+        "AuthType": "IAM_ROLE",
+        "Headers": {
+          "Content-Type": "application/json"
+        }
+      },
+      "Next": "ParseCreateRequestOutput",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "FinalizeFailedCreate"
+        }
+      ]
+    },
+    "ParseCreateRequestOutput": {
+      "Type": "Pass",
+      "Parameters": {
+        "parsedBody.$": "$.ResponseBody",
+        "statusCode.$": "$.StatusCode"
+      },
+      "Next": "SendApprovalToQueue"
+    },
+    "SendApprovalToQueue": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+      "Parameters": {
+        "QueueUrl": "${QueueUrl}",
+        "MessageBody": {
+          "taskId.$": "$.parsedBody.taskId",
+          "assessorEmail.$": "$.parsedBody.assessorEmail",
+          "title.$": "$.parsedBody.title",
+          "taskToken.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 172800,
+      "Next": "FinalizeSuccess",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "ResultPath": "$",
+          "Next": "EnrichTimeoutError"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$",
+          "Next": "EnrichGenericError"
+        }
+      ]
+    },
+    "EnrichTimeoutError": {
+      "Type": "Pass",
+      "Parameters": {
+        "taskId.$": "$.taskId",
+        "decision": "TIMED_OUT",
+        "comments": "Human did not respond before timeout",
+        "errorDetails.$": "$"
+      },
+      "Next": "FinalizeGeneric"
+    },
+    "EnrichGenericError": {
+      "Type": "Pass",
+      "Parameters": {
+        "taskId.$": "$.taskId",
+        "decision": "FAILED",
+        "comments": "Unhandled error in wait",
+        "errorDetails.$": "$"
+      },
+      "Next": "FinalizeGeneric"
+    },
+    "FinalizeSuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${FinalizeArn}",
+        "Payload.$": "$"
+      },
+      "End": true
+    },
+    "FinalizeGeneric": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${FinalizeArn}",
+        "Payload.$": "$"
+      },
+      "End": true
+    },
+    "FinalizeFailedCreate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${FinalizeArn}",
+        "Payload": {
+          "taskId": "",
+          "decision": "FAILED",
+          "comments": "CreateRequest failed"
+        }
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'SAM template for the Human Approval Workflow Application'
+
+Parameters:
+  # These parameters are expected to be provided from an existing infrastructure stack
+  AppSubnetIds:
+    Type: CommaDelimitedList
+    Description: 'Application Subnet IDs from the infrastructure stack.'
+  LambdaSecurityGroupId:
+    Type: String
+    Description: 'Security Group ID for Lambda Functions from the infrastructure stack.'
+  DBSecretArn:
+    Type: String
+    Description: 'ARN of the Secrets Manager secret for DB credentials.'
+  ApprovalSqsQueueUrl:
+    Type: String
+    Description: 'URL of the SQS queue.'
+  ApprovalSqsQueueArn:
+    Type: String
+    Description: 'ARN of the SQS queue.'
+  SenderEmail:
+    Type: String
+    Description: 'A verified email address in SES for sending notifications.'
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.11
+    MemorySize: 256
+    VpcConfig:
+      SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+      SubnetIds: !Ref AppSubnetIds
+    Environment:
+      Variables:
+        DB_SECRET_ARN: !Ref DBSecretArn
+        AWS_REGION: !Ref AWS::Region
+    Layers:
+      - !Ref Psycopg2Layer
+
+Resources:
+  Psycopg2Layer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: psycopg2-layer
+      ContentUri: . # Assumes you have a 'psycopg2' directory here
+      CompatibleRuntimes:
+        - python3.11
+    Metadata:
+      BuildMethod: python3.11
+
+  ApprovalApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+
+  CreateRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/create_request/
+      Handler: app.lambda_handler
+      Policies:
+        - VPCAccessPolicy: {}
+        - SecretsManagerReadPolicy:
+            SecretArn: !Ref DBSecretArn
+      Events:
+        CreateRequest:
+          Type: Api
+          Properties:
+            Path: /requests
+            Method: post
+            RestApiId: !Ref ApprovalApi
+
+  CallbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/callback/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmail
+      Policies:
+        - VPCAccessPolicy: {}
+        - SecretsManagerReadPolicy:
+            SecretArn: !Ref DBSecretArn
+        - SESCrudPolicy:
+            IdentityName: '*' # Be more specific in production
+      Events:
+        SqsEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref ApprovalSqsQueueArn
+            BatchSize: 1
+
+  ResumeWorkflowFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/resume_workflow/
+      Handler: app.lambda_handler
+      Policies:
+        - VPCAccessPolicy: {}
+        - SecretsManagerReadPolicy:
+            SecretArn: !Ref DBSecretArn
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt ApprovalStateMachine.Name
+      Events:
+        ResumeWorkflow:
+          Type: Api
+          Properties:
+            Path: /tasks/review
+            Method: post
+            RestApiId: !Ref ApprovalApi
+
+  UpdateTaskStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/update_status/
+      Handler: app.lambda_handler
+      Policies:
+        - VPCAccessPolicy: {}
+        - SecretsManagerReadPolicy:
+            SecretArn: !Ref DBSecretArn
+
+  ApprovalStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: 'HumanApprovalWorkflow-SAM'
+      DefinitionUri: statemachine/approval_workflow.asl.json
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CreateRequestFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref UpdateTaskStatusFunction
+        - SqsSendMessagePolicy:
+            QueueName: !GetAtt ApprovalSqsQueue.QueueName
+
+  # The SQS Queue is defined here but ideally comes from the infra stack
+  ApprovalSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: 'ApprovalSqsQueue-SAM'
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ApprovalApi}.execute-api.${AWS::Region}.amazonaws.com/prod"

@@ -1,0 +1,6 @@
+{
+  "pathParameters": {
+    "taskId": "REPLACE_ME_TASK_ID"
+  },
+  "body": "{\"decision\": \"APPROVE\", \"comments\": \"Looks good\"}"
+}
