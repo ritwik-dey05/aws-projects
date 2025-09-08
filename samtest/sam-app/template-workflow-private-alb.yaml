@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: State Machine stack — approval workflow
+
+Parameters:
+  # From 'sam-core.yaml' output/export
+  FinalizeArn:
+    Type: String
+    Description: Finalize Lambda ARN (export FinalizeFunctionArn)
+
+  # From static-infra exports
+  ApprovalQueueUrl:
+    Type: String
+  ApprovalQueueArn:
+    Type: String
+
+  # From your API (apigateway-iam-only) stack outputs
+  CreateRequestApiId:
+    Type: String
+    Description: HTTP API Id used by SFN to call /create-request
+  CreateRequestStage:
+    Type: String
+    Default: "$default"
+
+Resources:
+  ApprovalStateMachineSpring:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/approval_workflow_spring.asl.json
+      DefinitionSubstitutions:
+        CreateRequestApiId: !Ref CreateRequestApiId
+        CreateRequestStage: !Ref CreateRequestStage
+        FinalizeArn: !Ref FinalizeArn
+        QueueUrl: !Ref ApprovalQueueUrl
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            # Finalize Lambda invoke
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Ref FinalizeArn
+            # SQS send (waitForTaskToken)
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !Ref ApprovalQueueArn
+            # Allow SFN to call the specific HTTP API route
+            - Effect: Allow
+              Action: execute-api:Invoke
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CreateRequestApiId}/${CreateRequestStage}/POST/create-request"
+
+Outputs:
+  ApprovalStateMachineArn:
+    Description: Approval workflow state machine ARN
+    Value: !Ref ApprovalStateMachineSpring

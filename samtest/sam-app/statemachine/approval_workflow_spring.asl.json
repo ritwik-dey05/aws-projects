@@ -4,15 +4,13 @@
   "States": {
     "CreateRequest": {
       "Type": "Task",
-      "Resource": "arn:aws:states:::apigatewayv2:invoke",
-      "Arguments": {
-        "ApiEndpoint": "${CreateRequestServiceUrl}/create-request",
+      "Resource": "arn:aws:states:::apigateway:invoke",
+      "Parameters": {
+        "ApiEndpoint": "d9cqb09898.execute-api.us-east-1.amazonaws.com",
+        "Path": "/create-request",
         "Method": "POST",
-        "RequestBody.$": "$.body",
-        "AuthType": "IAM_ROLE",
-        "Headers": {
-          "Content-Type": "application/json"
-        }
+        "RequestBody": "$.body",
+        "AuthType": "IAM_ROLE"
       },
       "Next": "ParseCreateRequestOutput",
       "Catch": [
@@ -27,10 +25,23 @@
     "ParseCreateRequestOutput": {
       "Type": "Pass",
       "Parameters": {
-        "parsedBody.$": "$.ResponseBody",
+        "parsedBody.$": "States.StringToJson($.ResponseBody)",
         "statusCode.$": "$.StatusCode"
       },
-      "Next": "SendApprovalToQueue"
+      "Next": "CheckCreateStatus"
+    },
+    "CheckCreateStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            { "Variable": "$.statusCode", "NumericGreaterThanEquals": 200 },
+            { "Variable": "$.statusCode", "NumericLessThan": 300 }
+          ],
+          "Next": "SendApprovalToQueue"
+        }
+      ],
+      "Default": "FinalizeFailedCreate"
     },
     "SendApprovalToQueue": {
       "Type": "Task",
@@ -47,39 +58,27 @@
       "TimeoutSeconds": 172800,
       "Next": "FinalizeSuccess",
       "Catch": [
-        {
-          "ErrorEquals": [
-            "States.Timeout"
-          ],
-          "ResultPath": "$",
-          "Next": "EnrichTimeoutError"
-        },
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$",
-          "Next": "EnrichGenericError"
-        }
+        { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "EnrichTimeoutError" },
+        { "ErrorEquals": ["States.ALL"],     "ResultPath": "$.error", "Next": "EnrichGenericError" }
       ]
     },
     "EnrichTimeoutError": {
       "Type": "Pass",
       "Parameters": {
-        "taskId.$": "$.taskId",
+        "taskId.$": "$.parsedBody.taskId",
         "decision": "TIMED_OUT",
         "comments": "Human did not respond before timeout",
-        "errorDetails.$": "$"
+        "errorDetails.$": "$.error"
       },
       "Next": "FinalizeGeneric"
     },
     "EnrichGenericError": {
       "Type": "Pass",
       "Parameters": {
-        "taskId.$": "$.taskId",
+        "taskId.$": "$.parsedBody.taskId",
         "decision": "FAILED",
         "comments": "Unhandled error in wait",
-        "errorDetails.$": "$"
+        "errorDetails.$": "$.error"
       },
       "Next": "FinalizeGeneric"
     },
