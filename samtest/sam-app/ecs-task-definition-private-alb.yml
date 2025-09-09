@@ -8,6 +8,9 @@ Parameters:
   CallbackImageUri:
     Type: String
     Description: ECR image URI for Callback service
+  FinalizeImageUri:
+    Type: String
+    Description: ECR image URI for Finalize service
 
   # DB and Secrets (from static infra)
   DbSecretArn:
@@ -194,11 +197,52 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: callback
 
+  FinalizeTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: finalize-task
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [ FARGATE ]
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: finalize-service
+          Image: !Ref FinalizeImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DbHost
+            - Name: DB_PORT
+              Value: !Ref DbPort
+            - Name: DB_NAME
+              Value: !Ref DbName
+          Secrets:
+            - Name: DB_USERNAME
+              ValueFrom: !Sub "${DbSecretArn}:username::"
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub "${DbSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AppLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: finalize
+
 Outputs:
   CreateRequestTaskDefinitionArn:
     Value: !Ref CreateRequestTaskDefinition
   CallbackTaskDefinitionArn:
     Value: !Ref CallbackTaskDefinition
+  FinalizeTaskDefinitionArn:
+    Value: !Ref FinalizeTaskDefinition
   TaskExecutionRoleArn:
     Value: !GetAtt ECSTaskExecutionRole.Arn
   TaskRoleArn:

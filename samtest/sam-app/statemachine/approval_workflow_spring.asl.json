@@ -6,11 +6,16 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::apigateway:invoke",
       "Parameters": {
-        "ApiEndpoint": "d9cqb09898.execute-api.us-east-1.amazonaws.com",
+        "ApiEndpoint": "${ApprovalRestrictedApiEndpoint}",
         "Path": "/create-request",
         "Method": "POST",
-        "RequestBody": "$.body",
-        "AuthType": "IAM_ROLE"
+        "RequestBody.$": "$.body",
+        "AuthType": "IAM_ROLE",
+        "Headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        }
       },
       "Next": "ParseCreateRequestOutput",
       "Catch": [
@@ -25,7 +30,7 @@
     "ParseCreateRequestOutput": {
       "Type": "Pass",
       "Parameters": {
-        "parsedBody.$": "States.StringToJson($.ResponseBody)",
+        "parsedBody.$": "$.ResponseBody",
         "statusCode.$": "$.StatusCode"
       },
       "Next": "CheckCreateStatus"
@@ -56,7 +61,7 @@
         }
       },
       "TimeoutSeconds": 172800,
-      "Next": "FinalizeSuccess",
+      "Next": "ReviewSubmittedByApprover",
       "Catch": [
         { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "EnrichTimeoutError" },
         { "ErrorEquals": ["States.ALL"],     "ResultPath": "$.error", "Next": "EnrichGenericError" }
@@ -82,13 +87,20 @@
       },
       "Next": "FinalizeGeneric"
     },
-    "FinalizeSuccess": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "OutputPath": "$.Payload",
+    "ReviewSubmittedByApprover": {
+     "Type": "Task",
+      "Resource": "arn:aws:states:::apigateway:invoke",
       "Parameters": {
-        "FunctionName": "${FinalizeArn}",
-        "Payload.$": "$"
+        "ApiEndpoint": "${ApprovalRestrictedApiEndpoint}",
+        "Path": "/finalize",
+        "Method": "POST",
+        "RequestBody.$": "$",
+        "AuthType": "IAM_ROLE",
+        "Headers": {
+          "Content-Type": [
+            "application/json"
+          ]
+        }
       },
       "End": true
     },

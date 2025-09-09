@@ -79,12 +79,17 @@ Resources:
       Runtime: python3.12
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+          DEPLOY_TIMESTAMP: "2025-01-27-27-16-45"
       Policies:
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref DbSecretArn
+    Metadata:
+      BuildMethod: python3.12
 
   ResumeWorkflowFunction:
     Type: AWS::Serverless::Function
@@ -94,6 +99,9 @@ Resources:
       Runtime: python3.12
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+          DEPLOY_TIMESTAMP: "2025-01-27-16-45"
       Events:
         ResumeApiPost:
           Type: HttpApi
@@ -118,6 +126,8 @@ Resources:
                 - states:SendTaskSuccess
                 - states:SendTaskFailure
               Resource: "*"
+    Metadata:
+      BuildMethod: python3.12
 
 Outputs:
   WorkflowApiUrl:

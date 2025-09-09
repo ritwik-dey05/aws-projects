@@ -29,6 +29,8 @@ Parameters:
     Type: String
   CallbackTaskDefinitionArn:
     Type: String
+  FinalizeTaskDefinitionArn:
+    Type: String
 
   DesiredCountCreateRequest:
     Type: Number
@@ -36,10 +38,26 @@ Parameters:
   DesiredCountCallback:
     Type: Number
     Default: 1
+  DesiredCountFinalize:
+    Type: Number
+    Default: 1
 
 Resources:
   # Target group for CreateRequestService (HTTP 8080, IP target type for Fargate)
   CreateRequestTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /actuator/health
+      Matcher:
+        HttpCode: "200-399"
+
+  # Target group for FinalizeService (HTTP 8080, IP target type for Fargate)
+  FinalizeTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId: !Ref VpcId
@@ -63,6 +81,19 @@ Resources:
       Actions:
         - Type: forward
           TargetGroupArn: !Ref CreateRequestTargetGroup
+
+  # Listener rule to route /finalize* to the Finalize target group
+  FinalizeListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref InternalALBListenerArn
+      Priority: 101
+      Conditions:
+        - Field: path-pattern
+          Values: [ "/finalize*" ]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref FinalizeTargetGroup
 
   # Allow ALB to reach ECS tasks on 8080 (tight SG flow)
   ECSIngressFromALB:
@@ -121,18 +152,55 @@ Resources:
         MaximumPercent: 200
         MinimumHealthyPercent: 50
 
+  FinalizeService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - FinalizeListenerRule
+    Properties:
+      ServiceName: finalize-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref FinalizeTaskDefinitionArn
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCountFinalize
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [ !Ref ECSSecurityGroupId ]
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref FinalizeTargetGroup
+          ContainerName: finalize-service
+          ContainerPort: 8080
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+
 Outputs:
   CreateRequestTargetGroupArn:
     Description: Target group for CreateRequestService
     Value: !Ref CreateRequestTargetGroup
 
+  FinalizeTargetGroupArn:
+    Description: Target group for FinalizeService
+    Value: !Ref FinalizeTargetGroup
+
   CreateRequestListenerRuleArn:
     Description: Listener rule for /create-request*
     Value: !Ref CreateRequestListenerRule
 
+  FinalizeListenerRuleArn:
+    Description: Listener rule for /finalize*
+    Value: !Ref FinalizeListenerRule
+
   CreateRequestServiceName:
     Description: ECS service name
     Value: !GetAtt CreateRequestService.Name
+
+  FinalizeServiceName:
+    Description: ECS service name
+    Value: !GetAtt FinalizeService.Name
 
   CallbackServiceName:
     Description: ECS service name

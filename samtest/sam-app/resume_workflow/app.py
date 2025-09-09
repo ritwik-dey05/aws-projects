@@ -21,7 +21,7 @@ def lambda_handler(event, context):
     comments = body.get("comments") or ""
 
     if not task_id:
-        return {"statusCode":400,"body":json.dumps({"error":"taskId is required"})}
+        return {"statusCode":400,"body":json.dumps({"error":"taskId is must"})}
     if decision not in {"APPROVE","REJECT"}:
         return {"statusCode":400,"body":json.dumps({"error":"decision must be APPROVE or REJECT"})}
 

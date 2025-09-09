@@ -15,12 +15,15 @@ Parameters:
     Type: String
 
   # From your API (apigateway-iam-only) stack outputs
-  CreateRequestApiId:
+  ApprovalRestrictedApiEndpoint:
     Type: String
-    Description: HTTP API Id used by SFN to call /create-request
-  CreateRequestStage:
+    Description: HTTP API Endpoint used by SFN to call /create-request and /finalize
+  ApprovalRestrictedApiId:
     Type: String
-    Default: "$default"
+    Description: HTTP API Id used by SFN to call /create-request and /finalize
+  ApprovalRestrictedApiStage:
+    Type: String
+    Description: HTTP API Id used by SFN to call /create-request and /finalize
 
 Resources:
   ApprovalStateMachineSpring:
@@ -28,8 +31,7 @@ Resources:
     Properties:
       DefinitionUri: statemachine/approval_workflow_spring.asl.json
       DefinitionSubstitutions:
-        CreateRequestApiId: !Ref CreateRequestApiId
-        CreateRequestStage: !Ref CreateRequestStage
+        ApprovalRestrictedApiEndpoint: !Ref ApprovalRestrictedApiEndpoint
         FinalizeArn: !Ref FinalizeArn
         QueueUrl: !Ref ApprovalQueueUrl
       Policies:
@@ -46,7 +48,10 @@ Resources:
             # Allow SFN to call the specific HTTP API route
             - Effect: Allow
               Action: execute-api:Invoke
-              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CreateRequestApiId}/${CreateRequestStage}/POST/create-request"
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApprovalRestrictedApiId}/${ApprovalRestrictedApiStage}/POST/create-request"
+            - Effect: Allow
+              Action: execute-api:Invoke
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApprovalRestrictedApiId}/${ApprovalRestrictedApiStage}/POST/finalize"
 
 Outputs:
   ApprovalStateMachineArn:
